@@ -1,0 +1,341 @@
+/*
+  Room Intelligence System: Google Apps Script backend
+  ========================================================
+  Copy this into Extensions > Apps Script inside a Google Sheet.
+  Replace every YOUR_* placeholder below with your own values.
+  Never commit a version of this file with real credentials filled in.
+
+  Requires: OAuth2 for Apps Script library
+  Script ID: 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF
+  (Libraries -> + -> paste Script ID -> Add)
+*/
+
+// ========== RECEIVE DATA FROM ESP32 ==========
+
+const SECRET_KEY = 'YOUR_SHARED_SECRET'; // must match secrets.h on the ESP32
+
+function doPost(e) {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const data = JSON.parse(e.postData.contents);
+
+  if (data.secret !== SECRET_KEY) {
+    return ContentService.createTextOutput('Forbidden');
+  }
+
+  sheet.appendRow([new Date(), data.temp, data.humidity, data.brightness, data.window_open]);
+  return ContentService.createTextOutput('OK');
+}
+
+// ========== SETTINGS ==========
+
+const OURA_CLIENT_ID = 'YOUR_OURA_CLIENT_ID';
+const OURA_CLIENT_SECRET = 'YOUR_OURA_CLIENT_SECRET';
+const TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN';
+const TELEGRAM_CHAT_ID = 'YOUR_TELEGRAM_CHAT_ID';
+
+// ========== OURA OAUTH2 ==========
+// Oura deprecated Personal Access Tokens in Dec 2025, OAuth2 is required.
+// Register an app at https://cloud.ouraring.com/oauth/applications
+// Redirect URI: https://script.google.com/macros/d/{YOUR_SCRIPT_ID}/usercallback
+
+function getOuraService() {
+  return OAuth2.createService('oura')
+    .setAuthorizationBaseUrl('https://cloud.ouraring.com/oauth/authorize')
+    .setTokenUrl('https://api.ouraring.com/oauth/token')
+    .setClientId(OURA_CLIENT_ID)
+    .setClientSecret(OURA_CLIENT_SECRET)
+    .setCallbackFunction('authCallback')
+    .setPropertyStore(PropertiesService.getUserProperties())
+    .setScope('email personal daily');
+}
+
+function authorize() {
+  const service = getOuraService();
+  if (service.hasAccess()) {
+    Logger.log('Already authorized.');
+  } else {
+    Logger.log('Open this URL in your browser: ' + service.getAuthorizationUrl());
+  }
+}
+
+function authCallback(request) {
+  const service = getOuraService();
+  const authorized = service.handleCallback(request);
+  return HtmlService.createHtmlOutput(authorized ? 'Success! You can close this tab.' : 'Access denied.');
+}
+
+// ========== OURA DATA ==========
+
+function getOuraSleep() {
+  const service = getOuraService();
+  if (!service.hasAccess()) return null;
+
+  const today = new Date();
+  const endDate = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const startDate = Utilities.formatDate(new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  const url = 'https://api.ouraring.com/v2/usercollection/sleep?start_date=' + startDate + '&end_date=' + endDate;
+  const response = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + service.getAccessToken() } });
+  const nights = JSON.parse(response.getContentText()).data;
+  return nights && nights.length ? nights[nights.length - 1] : null;
+}
+
+function getOuraReadiness() {
+  const service = getOuraService();
+  if (!service.hasAccess()) return null;
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const url = 'https://api.ouraring.com/v2/usercollection/daily_readiness?start_date=' + today + '&end_date=' + today;
+  const response = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + service.getAccessToken() } });
+  const days = JSON.parse(response.getContentText()).data;
+  return days && days.length ? days[days.length - 1] : null;
+}
+
+// ========== ROOM DATA (from the raw sensor sheet) ==========
+
+function getRoomStatsForNight() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheets()[0];
+  const values = sheet.getDataRange().getValues();
+
+  const now = new Date();
+  const windowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7, 0, 0);
+  const windowStart = new Date(windowEnd.getTime() - 8 * 60 * 60 * 1000); // 23:00 the previous night
+
+  const temps = [], humids = [], brightnesses = [];
+  let windowOpenCount = 0, darkCount = 0, total = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const rowDate = new Date(values[i][0]);
+    if (rowDate >= windowStart && rowDate <= windowEnd) {
+      temps.push(Number(values[i][1]));
+      humids.push(Number(values[i][2]));
+      brightnesses.push(Number(values[i][3]));
+      if (values[i][4] === true || values[i][4] === 'true') windowOpenCount++;
+      if (Number(values[i][3]) < 50) darkCount++;
+      total++;
+    }
+  }
+
+  if (total === 0) return null;
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const avgTemp = avg(temps);
+  const variance = temps.reduce((a, t) => a + Math.pow(t - avgTemp, 2), 0) / temps.length;
+
+  return {
+    avgTemp: avgTemp,
+    minTemp: Math.min(...temps),
+    maxTemp: Math.max(...temps),
+    tempStdDev: Math.sqrt(variance),
+    avgHumidity: avg(humids),
+    avgBrightness: avg(brightnesses),
+    maxBrightness: Math.max(...brightnesses),
+    pctDark: (darkCount / total * 100),
+    pctWindowOpen: (windowOpenCount / total * 100),
+    readingsCount: total
+  };
+}
+
+// Target from sleep science literature (Matthew Walker): ~18-20C / 65-68F
+// for optimal deep sleep. Used as the baseline for Room Score below.
+function calculateRoomScore(room) {
+  const tempScore = Math.max(0, 25 - Math.abs(room.avgTemp - 19) * 5);
+  const humidityScore = Math.max(0, 25 - Math.abs(room.avgHumidity - 45) * 1.25);
+  const darknessScore = (room.pctDark / 100) * 25;
+  const stabilityScore = Math.max(0, 25 - room.tempStdDev * 10);
+  return Math.round(tempScore + humidityScore + darknessScore + stabilityScore);
+}
+
+// ========== REPORT HISTORY SHEET ==========
+
+function getReportSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Sleep Report');
+  if (!sheet) {
+    sheet = ss.insertSheet('Sleep Report');
+    sheet.appendRow(['Date', 'AvgTemp', 'MinTemp', 'MaxTemp', 'TempStdDev', 'AvgHumidity', 'AvgBrightness', 'MaxBrightness', 'PctDark', 'PctWindowOpen', 'RoomScore', 'Efficiency', 'TotalSleepMin', 'DeepSleepMin', 'RemSleepMin', 'HRV', 'RestingHR', 'AwakeMin', 'Readiness']);
+  }
+  return sheet;
+}
+
+function getHistoricalAverages() {
+  const sheet = getReportSheet();
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return null;
+
+  const rows = values.slice(1);
+  const avg = idx => {
+    const nums = rows.map(r => Number(r[idx])).filter(n => !isNaN(n) && n !== 0);
+    return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+  };
+
+  return {
+    avgTemp: avg(1),
+    avgHumidity: avg(5),
+    avgEfficiency: avg(11),
+    avgReadiness: avg(18),
+    nights: rows.length,
+    rows: rows
+  };
+}
+
+// ========== ANALYSIS: BUCKETS, BEST/WORST, CORRELATION ==========
+
+function getBucketAnalysis(rows) {
+  const buckets = { '<18C': [], '18-20C': [], '20-22C': [], '22-24C': [], '>24C': [] };
+  rows.forEach(r => {
+    const temp = Number(r[1]);
+    const eff = Number(r[11]);
+    if (!temp || !eff) return;
+    if (temp < 18) buckets['<18C'].push(eff);
+    else if (temp < 20) buckets['18-20C'].push(eff);
+    else if (temp < 22) buckets['20-22C'].push(eff);
+    else if (temp < 24) buckets['22-24C'].push(eff);
+    else buckets['>24C'].push(eff);
+  });
+
+  let result = '';
+  for (const key in buckets) {
+    if (buckets[key].length > 0) {
+      const avgEff = buckets[key].reduce((a, b) => a + b, 0) / buckets[key].length;
+      result += key + ': ' + avgEff.toFixed(1) + '% (' + buckets[key].length + ' nights)\n';
+    }
+  }
+  return result;
+}
+
+function getBestWorstNights(rows) {
+  const validRows = rows.filter(r => Number(r[11]) > 0);
+  if (validRows.length === 0) return null;
+  return {
+    best: validRows.reduce((a, b) => Number(a[11]) > Number(b[11]) ? a : b),
+    worst: validRows.reduce((a, b) => Number(a[11]) < Number(b[11]) ? a : b)
+  };
+}
+
+function pearsonCorrelation(x, y) {
+  const n = x.length;
+  const avgX = x.reduce((a, b) => a + b, 0) / n;
+  const avgY = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0, denomX = 0, denomY = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - avgX, dy = y[i] - avgY;
+    num += dx * dy;
+    denomX += dx * dx;
+    denomY += dy * dy;
+  }
+  const denom = Math.sqrt(denomX * denomY);
+  return denom === 0 ? 0 : num / denom;
+}
+
+function interpretCorrelation(r) {
+  const abs = Math.abs(r);
+  let strength;
+  if (abs < 0.2) strength = 'little to no relationship';
+  else if (abs < 0.4) strength = 'weak relationship';
+  else if (abs < 0.6) strength = 'moderate relationship';
+  else if (abs < 0.8) strength = 'strong relationship';
+  else strength = 'very strong relationship';
+  return strength + (r > 0 ? ' (warmer -> more)' : ' (warmer -> less)');
+}
+
+function getDeepSleepTempCorrelation(rows) {
+  const pairs = rows
+    .filter(r => Number(r[1]) && Number(r[12]) && Number(r[13]))
+    .map(r => ({ temp: Number(r[1]), deepPct: Number(r[13]) / Number(r[12]) * 100 }));
+
+  if (pairs.length < 5) return null;
+  const r = pearsonCorrelation(pairs.map(p => p.temp), pairs.map(p => p.deepPct));
+  return { r: r, n: pairs.length };
+}
+
+// ========== TELEGRAM ==========
+
+function sendTelegramMessage(text) {
+  const url = 'https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage';
+  UrlFetchApp.fetch(url, { method: 'post', payload: { chat_id: TELEGRAM_CHAT_ID, text: text } });
+}
+
+// ========== DAILY REPORT ==========
+
+function sendDailyReport() {
+  const sleep = getOuraSleep();
+  const readiness = getOuraReadiness();
+  const room = getRoomStatsForNight();
+
+  if (!sleep && !room) {
+    sendTelegramMessage('No data from Oura or the room sensor for last night.');
+    return;
+  }
+
+  const historyBefore = getHistoricalAverages();
+  const roomScore = room ? calculateRoomScore(room) : null;
+
+  const totalSleepMin = sleep ? Math.round(sleep.total_sleep_duration / 60) : null;
+  const deepMin = sleep ? Math.round(sleep.deep_sleep_duration / 60) : null;
+  const remMin = sleep ? Math.round(sleep.rem_sleep_duration / 60) : null;
+  const awakeMin = sleep ? Math.round(sleep.awake_time / 60) : null;
+
+  getReportSheet().appendRow([
+    new Date(),
+    room ? room.avgTemp.toFixed(1) : '', room ? room.minTemp.toFixed(1) : '', room ? room.maxTemp.toFixed(1) : '',
+    room ? room.tempStdDev.toFixed(2) : '', room ? room.avgHumidity.toFixed(1) : '', room ? room.avgBrightness.toFixed(0) : '',
+    room ? room.maxBrightness.toFixed(0) : '', room ? room.pctDark.toFixed(0) : '', room ? room.pctWindowOpen.toFixed(0) : '',
+    roomScore || '', sleep ? sleep.efficiency : '', totalSleepMin || '', deepMin || '', remMin || '',
+    sleep ? sleep.average_hrv : '', sleep ? sleep.average_heart_rate : '', awakeMin || '', readiness ? readiness.score : ''
+  ]);
+
+  const nightNumber = (historyBefore ? historyBefore.nights : 0) + 1;
+  let report = 'SLEEP LAB - Night #' + nightNumber + '\n';
+  report += Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd MMM yyyy') + '\n\n';
+
+  if (room) report += 'ROOM SCORE: ' + roomScore + '/100\n\n';
+
+  if (sleep) {
+    report += 'SLEEP\nEfficiency: ' + sleep.efficiency + '%';
+    if (historyBefore && historyBefore.avgEfficiency) {
+      report += ' (avg ' + historyBefore.avgEfficiency.toFixed(1) + '%)';
+    }
+    report += '\nTotal: ' + Math.floor(totalSleepMin / 60) + 'h ' + (totalSleepMin % 60) + 'm | Deep: ' + Math.floor(deepMin / 60) + 'h ' + (deepMin % 60) + 'm | REM: ' + Math.floor(remMin / 60) + 'h ' + (remMin % 60) + 'm\n';
+    report += 'HRV: ' + sleep.average_hrv + 'ms | Resting HR: ' + sleep.average_heart_rate + 'bpm | Awake: ' + awakeMin + 'm\n\n';
+  }
+
+  if (readiness) report += 'READINESS: ' + readiness.score + '\n\n';
+
+  if (room) {
+    report += 'ROOM (23:00-07:00)\nTemp: ' + room.avgTemp.toFixed(1) + 'C (' + room.minTemp.toFixed(1) + '-' + room.maxTemp.toFixed(1) + '), stability +/-' + room.tempStdDev.toFixed(1) + 'C\n';
+    report += 'Humidity: ' + room.avgHumidity.toFixed(0) + '% | Max brightness: ' + room.maxBrightness.toFixed(0) + ' | Dark: ' + room.pctDark.toFixed(0) + '%\n';
+    report += 'Window open: ' + room.pctWindowOpen.toFixed(0) + '%\n\n';
+  }
+
+  if (historyBefore && historyBefore.nights >= 7) {
+    report += 'BY TEMPERATURE RANGE (efficiency)\n' + getBucketAnalysis(historyBefore.rows) + '\n';
+    const bw = getBestWorstNights(historyBefore.rows);
+    if (bw) report += 'Best: ' + bw.best[11] + '% at ' + Number(bw.best[1]).toFixed(1) + 'C | Worst: ' + bw.worst[11] + '% at ' + Number(bw.worst[1]).toFixed(1) + 'C\n\n';
+  }
+
+  const deepCorr = historyBefore ? getDeepSleepTempCorrelation(historyBefore.rows) : null;
+  if (deepCorr) {
+    report += 'TEMPERATURE x DEEP SLEEP\nr=' + deepCorr.r.toFixed(2) + ' - ' + interpretCorrelation(deepCorr.r) + '\n\n';
+  }
+
+  report += 'Nights logged: ' + nightNumber;
+  sendTelegramMessage(report);
+}
+
+// ========== TRIGGER SETUP ==========
+
+function setupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'sendDailyReport') ScriptApp.deleteTrigger(t);
+  });
+
+  ScriptApp.newTrigger('sendDailyReport')
+    .timeBased()
+    .atHour(7)
+    .nearMinute(15)
+    .everyDays(1)
+    .create();
+
+  Logger.log('Trigger created: daily around 7:15am');
+}
