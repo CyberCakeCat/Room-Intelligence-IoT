@@ -15,7 +15,8 @@ actual math.
 
 This is that station.
 
-![Room Intelligence IoT — full stack overview](images/stack-overview.png)
+<img width="3600" height="4044" alt="Room Intelligence Stack-selection" src="https://github.com/user-attachments/assets/fba0a02e-0bb5-4adf-a2d1-14b2dbf17c61" />
+
 
 ---
 
