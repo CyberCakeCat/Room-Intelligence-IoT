@@ -1,348 +1,282 @@
-# 🌙⚡ Room Intelligence IoT
+# 🌙 Room Intelligence — why did I sleep badly?
 
-## Experiment log #001: does my room control my sleep?
+**An ESP32 bedroom sensor + Oura ring + NVIDIA Nemotron on Nebius Token Factory.
+Code calculates every number. The model explains them. The reed switch keeps everyone honest.**
 
-Every night, a tiny research station wakes up when I fall asleep. It
-watches the temperature drift, the light leak in, the window creak
-open. Meanwhile, a ring on my finger watches my heart do its thing:
-efficiency, deep sleep, HRV, the works.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+· Built for the **Nebius × NVIDIA Global AI Hackathon** — track: **Physical AI**
 
-At 7:15am, before I'm even conscious enough to ask, the two datasets
-get introduced to each other, run through a correlation test, and the
-verdict lands in my Telegram. Room Score included. Receipts included.
-No dashboard. No app. Just a text message with opinions, backed by
-actual math.
-
-This is that station.
-
-<img width="3600" height="4044" alt="Room Intelligence Stack-selection" src="https://github.com/user-attachments/assets/fba0a02e-0bb5-4adf-a2d1-14b2dbf17c61" />
-
+> 🎬 **Demo video (3 min):** ⏳ in editing — the link goes here before submission
+> 🖼️ **Morning report in Telegram:** [see a real one below](#what-arrives-in-the-morning)
 
 ---
 
-## 🧪 The hypothesis
+![Room Intelligence IoT · v1 → v2: what changed, how it works, the stack, the report](docs/diagrams/build-stack-v1-v2.png)
 
-> *Sleep tracking tells you what happened. It almost never tells you
-> why. Temperature, light, and airflow are supposed to be load-bearing
-> variables for deep sleep, according to the sleep-science literature.
-> A bedroom wired with sensors should be able to prove that, night by
-> night, with p-values instead of vibes.*
-
-So far: n=12 and counting. The room is being cross-examined.
+<sub>The Telegram card on this poster is an early report (16 Oct, before the evals). Two of its lines are exactly what the evals later caught:
+*"Your body coped"* while HRV was 12 ms below usual, and *"Open window wider"* on a night the window was open 100 % of the time.
+Both are now hard checks — see [Evaluation](#evaluation-we-measured-it-it-lost-we-fixed-it--method). Window state comes from the reed switch.</sub>
 
 ---
 
-## 🧰 What you need before you start
+## The problem
 
-Nothing here is exotic, but it's spread across a few different worlds:
-hardware store, cloud accounts, a wearable. Here's the full shopping
-plus signup list before any code gets written.
+A sleep tracker tells you *what* happened: short deep sleep, low HRV, restless night.
+It can't tell you *why* — because it has no idea what your bedroom was doing.
+Was it too warm? Was the air stale because the window was shut? Was it noisy?
 
-### Hardware to buy
+Room Intelligence closes that gap. A small sensor box on the bedside table records the room all night.
+In the morning, the system lines up the room with your Oura night and sends a short, honest explanation to Telegram:
+what the room did, how your body responded, and **one thing to try tonight**.
 
-- **An ESP32 board with a built-in camera.** This project uses a
-  **Freenove ESP32-WROVER CAM**. The camera has to be on the board
-  already, not a separate module wired in.
-- **A DHT22 temperature/humidity sensor.** Not included with most
-  ESP32 boards, bought separately, a few dollars.
-- **A breadboard and jumper wires** to connect the DHT22 without
-  soldering.
-- **A USB cable** that actually carries data (not a charge-only
-  cable) to flash the board and power it long-term.
-- *(Optional, on the roadmap):* a sound sensor (KY-038) and an NDIR
-  CO₂ sensor (MH-Z19) for the next round of the experiment.
-- *(Optional):* an **Oura Ring**, or any wearable with a public sleep
-  API. This is what supplies the "did I actually sleep well" half of
-  the dataset.
-
-### Software to install
-
-- **Arduino IDE**, free, from [arduino.cc](https://www.arduino.cc/en/software).
-  This is what you use to write and upload the firmware to the ESP32.
-- Inside Arduino IDE: add the **ESP32 board package** via
-  *Boards Manager* (search "esp32" by Espressif Systems) so the IDE
-  knows how to talk to this specific board.
-- The **`DHT sensor library`** (by Adafruit), installed via the
-  Arduino IDE's *Library Manager*.
-
-### Accounts to set up
-
-- **A Google account**, with access to **Google Drive / Google
-  Sheets**. This is where the raw sensor data lives. No special
-  Google Cloud project or billing needed, a normal free account is
-  enough.
-- **Google Apps Script.** Not a separate signup. It's a free tool
-  built into every Google Sheet (*Extensions → Apps Script*), and it's
-  where the backend logic (receiving ESP32 data, talking to Oura,
-  sending reports) actually runs.
-- **A Telegram account**, plus a bot created through **@BotFather**
-  (a few messages inside Telegram itself, no website involved). This
-  is where the daily report gets delivered.
-- **An Oura account** (if you're using the sleep-correlation half of
-  the project) and an **OAuth application registered** at
-  [cloud.ouraring.com/oauth/applications](https://cloud.ouraring.com/oauth/applications).
-  This is what lets the backend legally ask Oura for your sleep data
-  instead of you copy-pasting it every morning. To be precise about
-  what this actually is: it's not an app you install anywhere, it's a
-  developer-portal registration (a Client ID and Client Secret pair)
-  that identifies *this project* to Oura's API, so Oura knows who's
-  asking before it hands over any sleep data through the OAuth2 flow.
-
-Once all of that exists (board in hand, IDE installed, a blank Sheet
-open, a bot token in your pocket, Oura app registered), the
-[Setup](#️-running-your-own-experiment) section below wires it all
-together into one running system.
+It is an **n-of-1 experiment on one person**, not a medical device. One night is a hint, not proof — and the report says so.
 
 ---
 
-## 🗺️ How the signal travels
+## What arrives in the morning
 
-```
-   🛏️  YOUR ROOM                           💍  YOUR BODY
-   ┌──────────────┐                       ┌──────────────┐
-   │ ESP32-WROVER  │                       │  Oura Ring    │
-   │ camera+DHT22  │                       │  (does its    │
-   │ every 5 min   │                       │   own thing)  │
-   └──────┬───────┘                       └───────┬───────┘
-          │ HTTP POST, secret-signed                │ OAuth2
-          ▼                                        ▼
-   ┌────────────────────────────────────────────────────┐
-   │              Google Apps Script (the brain)          │
-   │   logs raw data  →  Sheets  →  7:15am cron  →         │
-   │   pulls last night's Oura  →  runs Pearson r  →        │
-   │   writes a verdict                                     │
-   └───────────────────────┬────────────────────────────┘
-                           ▼
-                    📩 Telegram, 7:15am
-                    (before you're awake
-                     enough to argue)
-```
+![A real morning report in Telegram](docs/screenshots/morning-report.png)
+
+<sub>A real report for the night ending Mon 19 Oct, requested with `/report`. **Left:** headline, the three scores, the main suspect chosen by code, and the night against my own usual. **Right:** bedroom numbers, one thing to try tonight, the "why" (Telegram folds the rest), and the night chart — CO₂, temperature and window on top, Oura sleep stages below.</sub>
 
 ---
 
-## 🔬 Choices a reviewer might ask about
+## How it works
 
-**Q: Why no photoresistor for light?**
-Because a camera was already sitting there doing nothing useful at
-3am. Light level and "is the window open" are both extracted from raw
-RGB565 pixel data instead: one less part on the breadboard, one more
-excuse to write bit-shifting code.
+![Report pipeline](docs/diagrams/report-pipeline_en.png)
 
-**Q: Why raw pixels instead of JPEG?**
-This particular camera silicon simply refuses to do hardware JPEG
-encoding. Discovered via a very confusing `0x106` error at 2am.
-Software encoding (`frame2jpg`) only happens on demand; analysis runs
-straight on the raw buffer.
+1. **ESP32 in the bedroom** reads CO₂, temperature, humidity, noise, light and a **reed switch on the window**.
+   It sends a row every 2 minutes, plus an instant row whenever the window opens or closes.
+2. **Google Apps Script** (`doPost`) appends each row to a Google Sheet.
+3. **Every 30 minutes** after 6:00, `morningCheck` asks Oura whether last night is ready
+   (or it's past 12:00). Then `sendDailyReport` runs once per day.
+4. **Code computes everything:** the night window (from Oura bedtime), room statistics for that window,
+   comparisons with your own baseline, verdicts (better / worse / normal), the main suspect, and fallback texts.
+5. The code writes a **correct draft** of the four fields (`headline`, `subline`, `why`, `tip`): the links it found and the action for tonight.
+   **NVIDIA Nemotron** (via **Nebius Token Factory**) rewrites the draft for a person, adding numbers from the facts.
+6. **Code checks every field** before it reaches you (see below). Bad fields are replaced by the code's own text.
+7. **Telegram** receives an HTML dashboard and a night chart (CO₂, temperature, window + Oura sleep stages).
+   A row is written to the `Sleep Report` sheet for history.
 
-**Q: Isn't OAuth2 overkill for a bedroom sensor?**
-Oura deprecated Personal Access Tokens mid-build, so "overkill" became
-"mandatory." The backend now does a full authorization-code handshake,
-server-side, so the ESP32 itself never sees a user credential. That's
-more security hygiene than most side projects bother with.
+**Full process (BPMN 2.0, drawn from the code — Code_v2.gs 2.2.0 + firmware v2):**
 
-**Q: What stops randoms from POSTing fake data to your webhook?**
-A pre-shared secret checked on every request. The URL is technically
-public (Apps Script Web Apps don't offer a native API-key layer), so
-the payload itself has to prove it belongs.
+[![BPMN: the full report process](docs/diagrams/room-intelligence-report-process_v4_en.png)](docs/diagrams/room-intelligence-report-process_v4_en.png)
 
-**Q: Why gate the correlation behind n ≥ 5?**
-Because a "correlation" computed from two nights of data is just two
-numbers wearing a lab coat.
+<sub>Click to open full size. Lanes: ESP32 firmware · `doPost` (receiving rows) · `morningCheck → sendDailyReport` (the morning report) · `pollTelegram` (commands).
+Function-by-function map of the code: [docs/HOW_THE_CODE_WORKS.md](docs/HOW_THE_CODE_WORKS.md).</sub>
 
 ---
 
-## 📡 What's actually being measured
+## How we use NVIDIA Nemotron and Nebius Token Factory
 
-| Signal | Source | Cadence |
+| | |
+|---|---|
+| **Model** | `nvidia/Nemotron-3_5-Lightning` (open model, served by Nebius Token Factory) |
+| **API** | OpenAI-compatible `/chat/completions` on Token Factory |
+| **Mode** | reasoning off: `chat_template_kwargs: { enable_thinking: false }` — short, fast, no `<think>` |
+| **Task** | rewrite the code's correct draft for a person: warmer, clearer, with concrete numbers — strict JSON `headline`, `subline`, `why`, `tip` |
+| **Where in the code** | `apps-script/Code_v2.gs` → `nebiusChat_()`, `dashTexts_()` |
+
+![Where Nemotron works](docs/diagrams/nemotron-detail_en.png)
+
+### Why the model can't make things up
+
+The model never sees raw data and never does arithmetic. It gets a short fact sheet that the code already computed,
+including **verdicts that it must not contradict**. Then every answer goes through checks:
+
+- **Number whitelist** — every number in `why` must appear in the input, written exactly the same way.
+- **No digits** in `headline`, `subline` and `tip`.
+- **Length limits** per field.
+- **Language** — English only (no Cyrillic), no `<think>` leftovers, no internal words like "code", "facts", "verdicts".
+- **No contradiction** — the headline can't call the night fine when two or more sleep metrics were worse, and can't get
+  the room direction wrong ("humidity low" at 69 %, "chilly" at 23 °C).
+- **No causes on thin data** — no "caused" or "due to" ever, and no room→body links when under 3 hours of sleep were recorded.
+- **Valid JSON** — otherwise the model is asked again.
+
+If a check fails, the model gets **one retry** with the list of problems.
+After that, **good fields from Nemotron are kept and bad ones are replaced by the code's fallback text**.
+If the model is unavailable, the report still goes out — fully from code.
+Every report records its AI status (`ok`, `partial`, `rejected`, `fallback`, `api_error`, `no_model`) in the `Sleep Report` sheet.
+
+### Evaluation: we measured it, it lost, we fixed it · [method](docs/EVALS.md)
+
+![Judges' verdicts v1 vs v2](docs/diagrams/eval-v1-v2_en.png)
+
+26 cases (3 real nights, 10 clear situations, 8 broken inputs, 5 traps) × 3 runs. Two judge models from different families,
+both on Nebius Token Factory — `nvidia/Nemotron-3-Ultra-550b-a55b` and `Qwen/Qwen3.5-397B-A17B` — compare Nemotron's report
+with the code-only template, blind, each pair twice (Nemotron as X, then as Y). Rubric: accuracy, explanation, actionability, clarity, honesty.
+
+![How the evaluation works](docs/diagrams/eval-pipeline_en.png)
+
+**v1 — Nemotron wrote from the facts and picked the tip itself.** The template won (46 % and 54 % of cases).
+The judges' reasons showed why: the model defaulted to *"open the window"* — even in a 14.8 °C room — and named causes
+where the code had found no link. Our own prompt had primed it with example tips.
+
+**v2 — the code writes a correct draft (links and the tip's action), Nemotron rewrites it.**
+
+| | v1 | v2 |
 |---|---|---|
-| Temperature, humidity | DHT22 | 5 min |
-| Brightness, window-open guess | camera pixel analysis | 5 min |
-| Sleep efficiency, stages, HRV, resting HR | Oura API v2 | daily |
-| Readiness | Oura API v2 | daily |
-| **Room Score (0–100)** | derived, benchmarked to ~18–20°C sleep-temp research | daily |
-| Temperature ↔ deep sleep % | Pearson r, n-gated | daily |
+| Nemotron-3-Ultra judge: Nemotron / template better | 27 % / 46 % | **42 % / 4 %** |
+| Qwen3.5-397B judge: Nemotron / template better | 35 % / 54 % | **38 % / 8 %** |
+| Nemotron's first answer passes all hard checks | 63 % | **77 %** |
+| Errors that reached the user | 0 | **0** |
+
+In v2 Nemotron scores above the template on accuracy, explanation, clarity and honesty with both judges
+(explanation 4.65 vs 4.21 and 4.83 vs 4.37); actionability is level with one judge (4.50 vs 4.52).
+The judges agree with each other on 11 of 12 cases with a stable verdict.
+
+**Honest caveats.** Ties grew to 54 %: both versions now say the same thing and differ in wording, so position bias decides more often —
+judge self-consistency fell from 81 % to 60 %, which is why every pair is judged in both orders.
+Only 3 of 26 cases are real nights so far.
+
+**Human blind review (me, 26 pairs, v2): Nemotron 13 · template 12 · tie 1.** For a person, v2 and the template read almost
+the same — v2 keeps the template's meaning by design, so the extra value of the rewrite in a four-line card is small; when the
+template was preferred, Nemotron's version was on average longer. So the morning card proves Nemotron can be made **safe**
+(as accurate as code, judged slightly better); the next step puts it where a template can't exist at all: answering free questions
+about your own nights in Telegram.
+
+**What the evals found along the way** — each became a fix and a test case:
+
+| Finding | Whose error | Fix |
+|---|---|---|
+| "Your body coped" on an 8-minute night with 5 worse metrics (real report, [INC-001](docs/EVALS.md)) | Nemotron | body-verdict check |
+| "Humidity low" at 69 % — **both judges scored it 5/5 for accuracy** | Nemotron (and the judges) | room-direction check |
+| "Open window wider" when it was open all night | Nemotron | tip vs window check |
+| "Open the window" in a cold room; causes where the code found none | Nemotron (prompt design) | v2: the code chooses the action and the links |
+| "Solid night" with two worse metrics; "the room wasn't the problem" with no room data | code template | thresholds and wording fixed |
+| No room→sleep link for a cold room, none for a good room | code verdicts | links added |
+| Our check rejected "cool room" at 18.4 °C (true) | our check | only strong words count |
 
 ---
 
-## 🧰 Stack
+## Hardware
 
-`C++` firmware (Arduino, `esp32-camera`, `DHT sensor library`), talking to
-a `Google Apps Script` backend (`OAuth2 for Apps Script`), which treats
-`Google Sheets` as a very scrappy time-series database, pulls ground
-truth from `Oura API v2`, and delivers the verdict through the
-`Telegram Bot API`.
+![Breadboard schematic](docs/diagrams/schematic-breadboard_en.png)
 
-**Hardware:** Freenove ESP32-WROVER CAM, DHT22, a breadboard held
-together by optimism. Sound (KY-038) and CO₂ (MH-Z19) sensors are
-inbound, see the roadmap.
+| Part | What it measures | Pins (ESP32) |
+|---|---|---|
+| Freenove ESP32-WROVER CAM | brain + Wi-Fi; the camera is used **only as a light meter** | — |
+| Sensirion SCD41 | CO₂ (ppm) | SDA **GPIO13**, SCL **GPIO14**, 3V3, GND |
+| DHT22 (3-pin module) | temperature, humidity | DATA **GPIO2**, 3V3, GND |
+| KY-038 | noise (analog) | AO **GPIO32** (ADC1), D0 not used |
+| Reed switch + magnet | window open / closed — **ground truth** | **GPIO15** → GND (internal pull-up), ~3 m cable |
+| USB 5 V / 2 A or power bank | power | USB |
+
+⚠️ **Before flashing, unplug the DHT22 DATA wire.** GPIO2 is a strapping pin and the module's pull-up blocks upload ("Failed to connect").
+I²C is on 13/14 because the camera uses 21/22.
+
+Wiring diagram: [`docs/diagrams/wiring-sensors-esp32_en.png`](docs/diagrams/wiring-sensors-esp32_en.png)
 
 ---
 
-## 📁 Repo map
+## Setup
+
+You need: the hardware above, an Oura ring, a Google account, a Telegram account and a Nebius Token Factory API key.
+
+### 1. Google Sheet + Apps Script
+
+1. Create a Google Sheet and name the first tab **Sensor Data**. Open **Extensions → Apps Script**.
+2. Paste `apps-script/Code_v2.gs`. For evaluation, add a second script file `Evals` with `apps-script/Evals.gs`.
+3. Add the **OAuth2 for Apps Script** library (needed for Oura): Libraries → `+` → script ID
+   `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF` → Add.
+4. **Project Settings → Script Properties** — add:
+
+   | Property | Value |
+   |---|---|
+   | `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` | from your Oura developer app |
+   | `TELEGRAM_BOT_TOKEN` | from @BotFather |
+   | `TELEGRAM_CHAT_ID` | your chat ID |
+   | `NEBIUS_API_KEY` | Nebius Token Factory key |
+   | `NEBIUS_MODEL` | `nvidia/Nemotron-3_5-Lightning` |
+   | `SECRET_KEY` | any long random string — **must match** `SHARED_SECRET` in the firmware |
+
+5. Run `setupSensorHeaders()` once.
+6. **Deploy → New deployment → Web app** (execute as you, access: anyone). Copy the web app URL.
+7. Run `authorize()` and open the logged link to connect Oura.
+8. Run `setupTrigger()` (30-minute `morningCheck`) and `setupCommands()` (Telegram commands).
+9. Run `checkSetup()`, then test: `testTelegram()`, `testNemotron()`, `sendDashboardDemo()`.
+
+**Telegram commands:** `/report` recalculates and resends today's report · `/skip` marks a missed night
+(no report or reminders today) · `/status` shows what data is available · `/help`.
+
+### 2. Firmware (ESP32)
+
+1. Arduino IDE + **esp32** board package. Board: *ESP32 Wrover Module*, PSRAM **enabled**.
+2. Install the libraries this firmware actually includes: **DHT sensor library** by Adafruit (+ its **Adafruit Unified Sensor** dependency) and **Sensirion I2C SCD4x**. `WiFi.h`, `HTTPClient.h`, `Wire.h`, `Preferences.h`, `time.h` and `esp_camera.h` ship with the ESP32 board package — nothing to add for those.
+3. Copy `esp32/secrets.h.example` → `esp32/room_intelligence_v2/secrets.h` and fill in
+   `WIFI_SSID`, `WIFI_PASSWORD`, `SHEETS_URL` (the web app URL) and `SHARED_SECRET`.
+4. **Unplug DHT22 DATA**, upload, plug it back.
+5. Open Serial Monitor at **115200**: you should see a sensor line and `Sheets: 200` or `302` every 2 minutes,
+   and an instant row when you move the magnet away from the reed switch.
+
+---
+
+## Data
+
+**Sensor Data** (one row every 2 min + one per window event):
+`Date · Temp °C · Humidity % · Brightness · (legacy, empty) · Sound · CO₂ ppm · Window Contact (open/closed)`
+
+**Oura Sleep** — one row per night from the Oura API.
+**Sleep Report** — one row per morning: room stats, Oura metrics, AI status and the explanation text.
+**Run Log** — one row per report and per command: Oura pieces, sleep minutes, night window, AI status and problems.
+
+---
+
+## Privacy and safety
+
+- **No photos leave the device.** The camera is only read as a brightness number.
+- All data lives in **your own** Google Sheet. The only external calls are Oura, Nebius Token Factory, QuickChart (chart image) and Telegram.
+- Secrets live in Script Properties and in a git-ignored `secrets.h` — never in the repository.
+- This is **not medical advice**. Single-night results are presented as hints ("may", "is consistent with"), never as causes.
+
+## Known limitations
+
+- **One person, few nights.** Correlations need weeks of data. The Oura API also limits unapproved apps to 10 users.
+- **Light** is the camera's frame brightness with auto-exposure — a rough indicator, not lux.
+- **Noise** is the signal swing of a cheap analog microphone; Wi-Fi adds interference. Treat it as relative.
+- **CO₂ recalibration** assumes outdoor air ≈ 420 ppm when the window has been open ≥ 15 min; in a city it can be higher.
+- Broken sleep arrives from Oura in pieces; they are merged into one night. Under 3 hours of sleep, the report does not link the room to the body.
+
+---
+
+## What changed during the submission period
+
+✅ **Done so far:**
+- Connected **NVIDIA Nemotron via Nebius Token Factory** for the morning explanation, with per-field validation, one retry and code fallback.
+- Replaced camera-based window detection (it fails in the dark) with a **reed switch as ground truth**.
+- Added **CO₂ (SCD41)** and **noise (KY-038)**; firmware v2: rows every 2 minutes + instant rows on window events, on-board CO₂ recalibration.
+- New **Telegram dashboard** with a night chart (room + Oura sleep stages).
+- **Evaluation harness** (`Evals.gs`): 26 cases × 3 runs, two judge models from different families, both orders, human blind review.
+- **v1 → v2 of the Nemotron step**, driven by the evals: the code writes a correct draft, Nemotron rewrites it; new hard checks for the body verdict, room direction, tip action and "no link".
+- **Broken-sleep nights** (real incident, 19 Oct): pieces of one night are merged; the early report waits for Oura's sleep score; "no data" is sent once.
+- **Telegram commands** `/report`, `/skip`, `/status`, `/help` and a `Run Log` tab.
+
+🔄 **In progress:**
+- **"Ask your room"** — Nemotron as a Telegram chat bot answering free questions about your own nights (code selects and computes, the model explains, the answer is checked). The code is in `Code_v2.gs` 2.3.0 but is **not deployed and not evaluated yet**; the numbers in this README were measured on version 2.2.0.
+- Demo video.
+
+
+## Feedback on Nebius Token Factory and NVIDIA models
+
+⏳ To be added before the submission deadline.
+
+## Repository structure
 
 ```
-esp32/            firmware + secrets.h.example (copy, fill, flash)
-apps-script/       Code.gs.example (copy into Extensions > Apps Script)
-docs/              TROUBLESHOOTING.md: the unedited autopsy of every bug
+apps-script/   Code_v2.gs (sensor intake, Oura, report, Telegram commands), Evals.gs
+esp32/         room_intelligence_v2/ (firmware), secrets.h.example
+docs/          EVALS.md, HOW_THE_CODE_WORKS.md, TROUBLESHOOTING.md, diagrams/, eval-results/, screenshots/
 ```
 
----
+## Roadmap
 
-## ⚙️ Running your own experiment
+- Make Nemotron a chat bot for the room ("Ask your room"), with its own evals
+- Hot-room advice: prefer "turn the radiator down" when the window was closed
+- Two weeks of nights → first real room ↔ sleep relationships
+- PCB shield and enclosure (pins will change: see `docs/`)
+- Battery + deep sleep
+- Small pilot with 5–10 Oura users
 
-1. DHT22 → GPIO 2 (GPIO 4 belongs to the camera, don't touch it). Flash
-   `esp32/room_intelligence.ino`, board = `ESP32 Wrover Module`.
-2. `cp esp32/secrets.h.example esp32/secrets.h`, then fill in Wi-Fi and
-   a random shared secret.
-3. New Sheet → *Extensions → Apps Script* → paste
-   `apps-script/Code.gs.example`, fill in the placeholders, add the
-   `OAuth2 for Apps Script` library
-   (`1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF`).
-4. Deploy → Web app → *Me* / *Anyone* → URL goes into `secrets.h`.
-5. Register an app at
-   [cloud.ouraring.com/oauth/applications](https://cloud.ouraring.com/oauth/applications),
-   run `authorize()`, approve.
-6. Run `setupTrigger()` once. Go to sleep. The lab takes it from here.
+## License
 
----
-
-## 📨 Actual field data
-
-```
-SLEEP LAB - Night #12
-14 Sep 2026
-
-ROOM SCORE: 78/100
-
-SLEEP
-Efficiency: 88% (avg 85.2%)
-Total: 7h 40m | Deep: 1h 42m | REM: 1h 55m
-HRV: 46ms | Resting HR: 55bpm | Awake: 14m
-
-READINESS: 81
-
-ROOM (23:00-07:00)
-Temp: 19.4C (18.1-20.6), stability +/-0.6C
-Humidity: 47% | Max brightness: 38 | Dark: 98%
-Window open: 0%
-
-BY TEMPERATURE RANGE (efficiency)
-18-20C: 87.3% (6 nights)
-20-22C: 81.1% (4 nights)
-22-24C: 76.0% (2 nights)
-
-TEMPERATURE x DEEP SLEEP
-r=-0.61 - moderate relationship (warmer -> less)
-
-Nights logged: 12
-```
-
-Twelve nights in, the room is starting to look guilty.
-
----
-
-## 🔒 Security first
-
-This system moves biometric data (yours) and lives on a publicly
-reachable URL (Apps Script Web Apps have no way around that). Data
-security is treated as more important than any feature in this repo.
-
-- **Every secret lives outside git, permanently.** `secrets.h` and the
-  real `Code.gs` are listed in `.gitignore`. Only `.example` templates
-  with placeholder values are ever committed.
-- **The ingest endpoint checks a shared secret on every request**,
-  instead of just relying on the URL being hard to guess. No valid
-  secret, no write to the sheet.
-- **Oura access uses real OAuth2, not a stored password or a bare
-  token.** The authorization lives in Google's own encrypted property
-  store, scoped to the minimum permissions needed (`email personal
-  daily`), not full account access.
-- **The raw data never leaves your own Google account.** The sheet,
-  the script, and the Oura authorization all belong to you. This repo
-  contains no server and no third-party database. Nothing here holds
-  a copy of your data.
-- **The Telegram bot only talks to one chat ID, yours,** hardcoded
-  server-side, not something an attacker could redirect.
-
-If you fork this: generate your *own* shared secret and your *own*
-Oura app credentials. Never reuse the placeholder values, and never
-commit the filled-in versions.
-
----
-
-## 🧠 Key learnings so far
-
-A few things the sleep-science research (and the data itself) made
-obvious that weren't obvious going in.
-
-- **Resting heart rate at bedtime turns out to matter more than
-  expected.** If your resting heart rate when you lie down is already
-  above your personal baseline, that alone tends to predict a rough
-  night: trouble falling asleep, more wake events, or both. This
-  project doesn't have a dedicated continuous heart-rate sensor of its
-  own yet, so Oura's nightly average heart rate is being used as a
-  proxy while that gap gets closed.
-- **Darkness is a primary variable, not a side note.** The sensors
-  already measure exactly how dark the room stays through the night
-  (not just "is the light off," but the actual percentage of the
-  night spent below a brightness threshold), because the sleep-science
-  sources are consistent that this matters as much as temperature.
-- **Blue light before bed is avoided on principle**, based on the same
-  research. This isn't something the sensors enforce, that's a human
-  behavior, not a hardware feature, but it's part of the protocol this
-  whole experiment is implicitly testing.
-- **Room conditions are only part of the story.** Alcohol, a late
-  meal, and a late workout all show up in the sleep-science literature
-  as real, independent factors, and none of them are currently
-  captured by any sensor here (logged manually if at all). Worth being
-  honest about: any correlation this system finds between room
-  conditions and sleep quality is happening alongside these uncaptured
-  variables, not in a vacuum.
-
-The experiment has really only just started. The roadmap below is
-where the actual pattern-hunting happens next.
-
----
-
-## 🚧 Open questions the lab hasn't answered yet
-
-**Sensors in the pipeline:**
-- [ ] Sound sensor (KY-038, incoming): does traffic noise actually
-      fragment deep sleep, or does it just feel that way?
-- [ ] NDIR CO₂ sensor (MH-Z19, incoming): does a closed window's CO₂
-      buildup show up in next-morning readiness?
-- [ ] EMF sensor: still hunting for one that's actually reliable and
-      not snake oil. Suggestions welcome.
-
-**Correlations the experiment is actually running for** (the whole
-point of this project; n is still small, so treat all of this as
-hypotheses in progress, not conclusions):
-- [ ] Resting heart rate at bedtime vs. sleep quality: does going to
-      bed with an elevated resting HR predict a worse night, the same
-      way it predicts trouble falling asleep in the sleep-science
-      literature?
-- [ ] Open window / fresh air vs. sleep quality: does ventilation
-      actually help, or is it a wash once temperature is controlled
-      for?
-- [ ] Just how much darkness matters: the room is already scored on
-      percentage of the night spent dark; the open question is how
-      strongly that specific variable, isolated from temperature,
-      moves the needle.
-- [ ] Sunrise timing vs. natural wake time: does the room getting
-      brighter earlier actually pull wake-up time earlier with it?
-
-**Quality of life:**
-- [ ] A weekly digest, for when the daily report starts feeling like
-      doomscrolling your own biology.
-
----
-
-## 🧾 Disclosures
-
-Room Score thresholds and report framing are grounded in public
-sleep-science talks (Matthew Walker, Andrew Huberman), cited in
-`docs/TROUBLESHOOTING.md` and inline comments. This is an N-of-1
-experiment on one (1) specific human in one (1) specific room. Results
-may not generalize. That's kind of the point.
-
-MIT licensed, see [LICENSE](LICENSE).
+[MIT](LICENSE) © 2026 Julia Zabrodska
