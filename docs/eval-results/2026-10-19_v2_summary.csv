@@ -1,0 +1,48 @@
+Metric,Value,Notes,
+Run,20261019-1241,Code_v2.gs 2.2.0
+Cases,26,real + synthetic + broken input + traps
+Model runs,78,3 runs per case
+AI status,ok 68 · partial 10,ok = all 4 fields from Nemotron
+Retry needed,23%,first answer failed a check
+LEVEL 1 — automatic checks,Template (no AI),"Nemotron, first answer",Shown to user
+"Hard: no lies (numbers, format, body, causes, room, tip action, no-link)",100%,77% (60/78),100% (78/78)
+Everything incl. quality,100%,73% (57/78),95% (74/78)
+"No invented numbers in ""why""",100%,99% (77/78),100% (78/78)
+"Format (length, no digits, English)",100%,97% (76/78),100% (78/78)
+Does not contradict the body verdict,100%,91% (71/78),100% (78/78)
+No causal overclaim,100%,100% (78/78),100% (78/78)
+"Room direction right (humidity, heat, air, light)",100%,95% (74/78),100% (78/78)
+Tip gives the action the code chose,100%,92% (72/78),100% (78/78)
+Says so when there is no room-body link,100%,100% (78/78),100% (78/78)
+Hedges single-night claims,100%,90% (35/39),90% (35/39)
+Tip targets the main suspect,100%,96% (43/45),100% (45/45)
+Headline names the right room problem,100%,100% (75/75),100% (75/75)
+Nemotron writes its own words (no stock phrase),99%,77 / 78
+Nemotron first answers with invented numbers,1 / 78,S09_short_night_fine_room: Sat May 02 2026 00:00:00 GMT+0100 (British Summer Time)
+LEVEL 2 — stability (3 runs per case),
+Same AI status in every run,88%,
+Every run passes all final checks,88%
+Every run passes all first-answer checks,50%,how reliable Nemotron is without the safety net
+"LEVEL 3 — usefulness vs template (blind judges, both orders)",,
+nvidia/Nemotron-3-Ultra-550b-a55b: Nemotron wins,42%,11 / 26 (both orders agree)
+nvidia/Nemotron-3-Ultra-550b-a55b: template wins,4%,1 / 26
+nvidia/Nemotron-3-Ultra-550b-a55b: tie / order-dependent,54%,14 / 26 (9 changed with order)
+nvidia/Nemotron-3-Ultra-550b-a55b: accuracy (AI vs template),4.90 vs 4.77,1–5
+nvidia/Nemotron-3-Ultra-550b-a55b: explanation (AI vs template),4.65 vs 4.21,1–5
+nvidia/Nemotron-3-Ultra-550b-a55b: actionability (AI vs template),4.12 vs 3.96,1–5
+nvidia/Nemotron-3-Ultra-550b-a55b: clarity (AI vs template),4.94 vs 4.88,1–5
+nvidia/Nemotron-3-Ultra-550b-a55b: honesty (AI vs template),4.92 vs 4.79,1–5
+Qwen/Qwen3.5-397B-A17B: Nemotron wins,38%,10 / 26 (both orders agree)
+Qwen/Qwen3.5-397B-A17B: template wins,8%,2 / 26
+Qwen/Qwen3.5-397B-A17B: tie / order-dependent,54%,14 / 26 (12 changed with order)
+Qwen/Qwen3.5-397B-A17B: accuracy (AI vs template),4.96 vs 4.87,1–5
+Qwen/Qwen3.5-397B-A17B: explanation (AI vs template),4.83 vs 4.37,1–5
+Qwen/Qwen3.5-397B-A17B: actionability (AI vs template),4.50 vs 4.52,1–5
+Qwen/Qwen3.5-397B-A17B: clarity (AI vs template),4.88 vs 4.81,1–5
+Qwen/Qwen3.5-397B-A17B: honesty (AI vs template),4.92 vs 4.81,1–5
+Judge self-consistency,60%,same verdict when X/Y are swapped
+Judges agree with each other,92%,11 / 12 cases with a stable verdict from both
+Nemotron wins — real,67%,3 stable verdicts
+Nemotron wins — synthetic,64%,14 stable verdicts
+Nemotron wins — broken,56%,9 stable verdicts
+Nemotron wins — trap,100%,5 stable verdicts
