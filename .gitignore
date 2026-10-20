@@ -1,0 +1,13 @@
+# Secrets: never commit
+secrets.h
+
+# Arduino IDE
+*.hex
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env files
+.env
