@@ -6,7 +6,7 @@ Code calculates every number. The model explains them. The reed switch keeps eve
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 · Built for the **Nebius × NVIDIA Global AI Hackathon** — track: **Physical AI**
 
-> 🎬 **Demo video (3 min):** ⏳ in editing — the link goes here before submission
+> 🎬 **Demo video (3 min):** [watch on YouTube](https://youtu.be/-kaKjPnuUN0)
 > 🖼️ **Morning report in Telegram:** [see a real one below](#what-arrives-in-the-morning)
 
 ---
@@ -253,8 +253,6 @@ You need: the hardware above, an Oura ring, a Google account, a Telegram account
 
 🔄 **In progress:**
 - **"Ask your room"** — Nemotron as a Telegram chat bot answering free questions about your own nights (code selects and computes, the model explains, the answer is checked). The code is in `Code_v2.gs` 2.3.0 but is **not deployed and not evaluated yet**; the numbers in this README were measured on version 2.2.0.
-- Demo video.
-
 
 ## Feedback on Nebius Token Factory and NVIDIA models
 
