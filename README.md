@@ -1,21 +1,21 @@
 # 🌙 Room Intelligence — why did I sleep badly?
 
 **An ESP32 bedroom sensor + Oura ring + NVIDIA Nemotron on Nebius Token Factory.
-Code calculates every number. The model explains them. The reed switch keeps everyone honest.**
+Every 5 minutes, my body and my room on one timeline. Code calculates every number. The model explains them. The reed switch keeps everyone honest.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 · Built for the **Nebius × NVIDIA Global AI Hackathon** — track: **Physical AI**
 
-> 🎬 **Demo video (3 min):** [watch on YouTube](https://youtu.be/-kaKjPnuUN0)
-> 🖼️ **Morning report in Telegram:** [see a real one below](#what-arrives-in-the-morning)
+> 🎬 **Demo video (3 min):** [watch on YouTube](https://youtu.be/-kaKjPnuUN0)<br>
+> 🖼️ **Morning report in Telegram:** [what is in it](#what-arrives-in-the-morning)
 
 ---
 
-![Room Intelligence IoT · v1 → v2: what changed, how it works, the stack, the report](docs/diagrams/build-stack-v1-v2.png)
+![The v3 morning report: you × your room, a real night (15→16 Oct)](docs/screenshots/morning-report-v3-16oct-frame.png)
 
-<sub>The Telegram card on this poster is an early report (16 Oct, before the evals). Two of its lines are exactly what the evals later caught:
-*"Your body coped"* while HRV was 12 ms below usual, and *"Open window wider"* on a night the window was open 100 % of the time.
-Both are now hard checks — see [Evaluation](#evaluation-we-measured-it-it-lost-we-fixed-it--method). Window state comes from the reed switch.</sub>
+<sub>The v3 report for a real night (15→16 Oct): `Code_v3.gs` built it from the real bedroom and Oura data; it is drawn in Telegram's style,
+and the text is the code's draft before Nemotron rewrites it. The room stayed at 22.5–23.8 °C all night with the window open;
+my HRV was **32 ms vs 42 ms** on my other nights, lower in every sleep stage, and my pulse **69 vs 60 bpm**.</sub>
 
 ---
 
@@ -33,11 +33,44 @@ It is an **n-of-1 experiment on one person**, not a medical device. One night is
 
 ---
 
+## Ring × room: every 5 minutes (v3)
+
+Oura keeps three **5-minute series** inside every night: heart rate, HRV and sleep stage. Most apps only show their averages.
+Version 3 joins **every 5-minute point of my body with the room readings from the same minutes** (±3 min) and compares
+**within the same sleep stage** — HRV is naturally different in deep, light and REM sleep. The morning report now leads with
+**YOU × YOUR ROOM** (what the room did, what my HRV and pulse did) and **YOUR MAP** (my HRV and pulse at each room temperature, all nights).
+
+What the first 7 nights with both data streams showed:
+
+| Room | My HRV | My pulse |
+|---|---|---|
+| 20–21 °C (6 nights) | 43 ms | 60 bpm |
+| 22 °C (6 nights) | 40 ms | 60 bpm |
+| 23 °C (4 nights) | 34 ms | 66 bpm |
+| 24 °C (1 night) | 29 ms | 72 bpm |
+
+- Hottest night (23.1 °C): HRV **32 vs 42 ms** on my other nights, **lower in every sleep stage**; pulse **69 vs 60 bpm**.
+- Another night crossed 22.5 °C for **80 minutes** before dawn: HRV **33 vs 39 ms** in the same sleep stages the rest of that night.
+- Within a night, small temperature swings showed no link — the room matters as a whole-night setting, so the fix is setting it before bed.
+
+Seven nights and one hot night carry most of this: the report calls it **a hint, not a rule**, until more nights agree.
+`fusionBacktest()` recomputes 34 of these numbers from Oura and the sheet and checks them against an independent calculation (all match).
+How it is built: [docs/HOW_THE_CODE_WORKS.md, section 4](docs/HOW_THE_CODE_WORKS.md).
+
+---
+
 ## What arrives in the morning
 
-![A real morning report in Telegram](docs/screenshots/morning-report.png)
+Since v3 the message starts with the link between you and the room (the report at the top of this page):
 
-<sub>A real report for the night ending Mon 19 Oct, requested with `/report`. **Left:** headline, the three scores, the main suspect chosen by code, and the night against my own usual. **Right:** bedroom numbers, one thing to try tonight, the "why" (Telegram folds the rest), and the night chart — CO₂, temperature and window on top, Oura sleep stages below.</sub>
+- **🫀 YOU × YOUR ROOM** — the room in the minutes the ring recorded, your HRV and pulse against your other nights,
+  and what moved together: warm or stuffy minutes compared with the same sleep stages the rest of the night.
+- **🗺 YOUR MAP** — your HRV and pulse at each room temperature, across all nights; it grows every night.
+- **✅ Tonight** — one thing to try. **Why?** and **Details** (scores, you vs your usual, bedroom numbers) are folded.
+- **The night chart** — CO₂, window and temperature on top, **your HRV** and Oura sleep stages below, on one time axis.
+- How sure it is: *"warm minutes went with a worse HRV or pulse on 2 of 3 nights that had them — a hint, not a rule yet."*
+
+<sub>The previous layout as a real Telegram screenshot: [v2 report, 19 Oct](docs/screenshots/morning-report.png).</sub>
 
 ---
 
@@ -51,19 +84,22 @@ It is an **n-of-1 experiment on one person**, not a medical device. One night is
 3. **Every 30 minutes** after 6:00, `morningCheck` asks Oura whether last night is ready
    (or it's past 12:00). Then `sendDailyReport` runs once per day.
 4. **Code computes everything:** the night window (from Oura bedtime), room statistics for that window,
-   comparisons with your own baseline, verdicts (better / worse / normal), the main suspect, and fallback texts.
+   **the ring × room join** (every 5-minute heart rate, HRV and sleep stage with the room in the same minutes; tonight vs your other nights,
+   warm and stuffy minutes vs the same sleep stages; your temperature map), comparisons with your own baseline, verdicts, the main suspect, and fallback texts.
 5. The code writes a **correct draft** of the four fields (`headline`, `subline`, `why`, `tip`): the links it found and the action for tonight.
    **NVIDIA Nemotron** (via **Nebius Token Factory**) rewrites the draft for a person, adding numbers from the facts.
 6. **Code checks every field** before it reaches you (see below). Bad fields are replaced by the code's own text.
-7. **Telegram** receives an HTML dashboard and a night chart (CO₂, temperature, window + Oura sleep stages).
+7. **Telegram** receives an HTML dashboard led by *YOU × YOUR ROOM* and *YOUR MAP*, and a night chart (CO₂, temperature, window, your HRV and Oura sleep stages).
    A row is written to the `Sleep Report` sheet for history.
 
-**Full process (BPMN 2.0, drawn from the code — Code_v2.gs 2.2.0 + firmware v2):**
+<details><summary><b>The full process as BPMN 2.0</b>, drawn from the code (Code_v3.gs 3.0.0 + firmware v2; the ring × room step is green)</summary>
 
 [![BPMN: the full report process](docs/diagrams/room-intelligence-report-process_v4_en.png)](docs/diagrams/room-intelligence-report-process_v4_en.png)
 
-<sub>Click to open full size. Lanes: ESP32 firmware · `doPost` (receiving rows) · `morningCheck → sendDailyReport` (the morning report) · `pollTelegram` (commands).
-Function-by-function map of the code: [docs/HOW_THE_CODE_WORKS.md](docs/HOW_THE_CODE_WORKS.md).</sub>
+<sub>Click to open full size. Lanes: ESP32 firmware · `doPost` (receiving rows) · `morningCheck → sendDailyReport` (the morning report) · `pollTelegram` (commands).</sub>
+</details>
+
+Function-by-function map of the code: [docs/HOW_THE_CODE_WORKS.md](docs/HOW_THE_CODE_WORKS.md).
 
 ---
 
@@ -75,7 +111,7 @@ Function-by-function map of the code: [docs/HOW_THE_CODE_WORKS.md](docs/HOW_THE_
 | **API** | OpenAI-compatible `/chat/completions` on Token Factory |
 | **Mode** | reasoning off: `chat_template_kwargs: { enable_thinking: false }` — short, fast, no `<think>` |
 | **Task** | rewrite the code's correct draft for a person: warmer, clearer, with concrete numbers — strict JSON `headline`, `subline`, `why`, `tip` |
-| **Where in the code** | `apps-script/Code_v2.gs` → `nebiusChat_()`, `dashTexts_()` |
+| **Where in the code** | `apps-script/Code_v3.gs` → `nebiusChat_()`, `dashTexts_()` |
 
 ![Where Nemotron works](docs/diagrams/nemotron-detail_en.png)
 
@@ -105,8 +141,7 @@ Every report records its AI status (`ok`, `partial`, `rejected`, `fallback`, `ap
 26 cases (3 real nights, 10 clear situations, 8 broken inputs, 5 traps) × 3 runs. Two judge models from different families,
 both on Nebius Token Factory — `nvidia/Nemotron-3-Ultra-550b-a55b` and `Qwen/Qwen3.5-397B-A17B` — compare Nemotron's report
 with the code-only template, blind, each pair twice (Nemotron as X, then as Y). Rubric: accuracy, explanation, actionability, clarity, honesty.
-
-![How the evaluation works](docs/diagrams/eval-pipeline_en.png)
+The full method, with a diagram of every step: [docs/EVALS.md](docs/EVALS.md).
 
 **v1 — Nemotron wrote from the facts and picked the tip itself.** The template won (46 % and 54 % of cases).
 The judges' reasons showed why: the model defaulted to *"open the window"* — even in a 14.8 °C room — and named causes
@@ -176,7 +211,7 @@ You need: the hardware above, an Oura ring, a Google account, a Telegram account
 ### 1. Google Sheet + Apps Script
 
 1. Create a Google Sheet and name the first tab **Sensor Data**. Open **Extensions → Apps Script**.
-2. Paste `apps-script/Code_v2.gs`. For evaluation, add a second script file `Evals` with `apps-script/Evals.gs`.
+2. Paste `apps-script/Code_v3.gs`. For evaluation, add a second script file `Evals` with `apps-script/Evals.gs`. Run `fusionBacktest()` once to build the ring × room history (`Fusion 5min` tab).
 3. Add the **OAuth2 for Apps Script** library (needed for Oura): Libraries → `+` → script ID
    `1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF` → Add.
 4. **Project Settings → Script Properties** — add:
@@ -250,9 +285,10 @@ You need: the hardware above, an Oura ring, a Google account, a Telegram account
 - **v1 → v2 of the Nemotron step**, driven by the evals: the code writes a correct draft, Nemotron rewrites it; new hard checks for the body verdict, room direction, tip action and "no link".
 - **Broken-sleep nights** (real incident, 19 Oct): pieces of one night are merged; the early report waits for Oura's sleep score; "no data" is sent once.
 - **Telegram commands** `/report`, `/skip`, `/status`, `/help` and a `Run Log` tab.
+- **v3 — ring × room every 5 minutes** (28 Oct): Oura's 5-minute heart rate, HRV and sleep stage joined with the room in the same minutes, compared within the same sleep stage; the report leads with *YOU × YOUR ROOM* and *YOUR MAP*; HRV on the night chart; `fusionBacktest()` checks 34 numbers on 7 real nights against an independent calculation. On the 23 constructed eval cases the model input, draft and checks are identical to 2.3.0, so the measured path did not change.
 
 🔄 **In progress:**
-- **"Ask your room"** — Nemotron as a Telegram chat bot answering free questions about your own nights (code selects and computes, the model explains, the answer is checked). The code is in `Code_v2.gs` 2.3.0 but is **not deployed and not evaluated yet**; the numbers in this README were measured on version 2.2.0.
+- **"Ask your room"** — Nemotron as a Telegram chat bot answering free questions about your own nights (code selects and computes, the model explains, the answer is checked). It is deployed with `Code_v3.gs` 3.0.0 but **not evaluated yet**; the eval numbers in this README were measured on version 2.2.0.
 
 ## Feedback on Nebius Token Factory and NVIDIA models
 
@@ -261,7 +297,7 @@ You need: the hardware above, an Oura ring, a Google account, a Telegram account
 ## Repository structure
 
 ```
-apps-script/   Code_v2.gs (sensor intake, Oura, report, Telegram commands), Evals.gs
+apps-script/   Code_v3.gs (sensor intake, Oura, ring × room, report, Telegram commands), Code_v2.gs (previous version), Evals.gs
 esp32/         room_intelligence_v2/ (firmware), secrets.h.example
 docs/          EVALS.md, HOW_THE_CODE_WORKS.md, TROUBLESHOOTING.md, diagrams/, eval-results/, screenshots/
 ```

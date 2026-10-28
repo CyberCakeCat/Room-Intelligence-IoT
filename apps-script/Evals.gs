@@ -1,5 +1,5 @@
 // =====================================================================
-// ROOM INTELLIGENCE — EVALS. Separate file in the same Apps Script project; uses Code_v2.gs.
+// ROOM INTELLIGENCE — EVALS. Separate file in the same Apps Script project; uses Code_v3.gs (3.0.0).
 //
 // Question: does Nemotron make the morning report better than the code's template, without lying?
 //   Level 1  automatic checks on every answer: numbers from the input only, format, no contradiction with
@@ -406,7 +406,7 @@ function summarizeEvals() {
   const add = (m, v, note) => out.push([m, v, note || '', '']);
 
   const modelRows = res.filter(r => r.Status !== 'api_error' && r.Status !== 'no_model');
-  add('Run', st ? st.runId : '', 'Code_v2.gs ' + CODE_VERSION);
+  add('Run', st ? st.runId : '', 'Code_v3.gs ' + CODE_VERSION);
   add('Cases', new Set(res.map(r => r.CaseId)).size, 'real + synthetic + broken input + traps');
   add('Model runs', res.length, EVAL_REPS + ' runs per case');
   const sc = {}; res.forEach(r => sc[r.Status] = (sc[r.Status] || 0) + 1);
@@ -528,8 +528,10 @@ function evRows_(name) {
 // Look for: clean JSON from the judges, no <think>, sensible timing.
 function evCheckVersion_() {
   const v = (typeof CODE_VERSION === 'undefined') ? null : CODE_VERSION;
-  if (v !== '2.3.0') throw new Error('Code_v2.gs is outdated (' + (v || 'no version') + '). Paste the latest Code_v2.gs (2.3.0) first.');
-  Logger.log('Code_v2.gs version ' + v + ' ✅');
+  // v3.0.0: the report code moved to Code_v3.gs; the checks and the model step are the same as in 2.3.0,
+  // and the eval cases carry no 5-minute ring data, so they exercise the same path as before
+  if (v !== '3.0.0') throw new Error('Code_v3.gs is outdated (' + (v || 'no version') + '). Paste the latest Code_v3.gs (3.0.0) first.');
+  Logger.log('Code_v3.gs version ' + v + ' ✅');
 }
 
 function evalsQuickCheck() {
