@@ -6,7 +6,7 @@ Every 5 minutes, my body and my room on one timeline. Code calculates every numb
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 · Built for the **Nebius × NVIDIA Global AI Hackathon** — track: **Physical AI**
 
-> 🎬 **Demo video (3 min):** [watch on YouTube](https://youtu.be/-kaKjPnuUN0)<br>
+> 🎬 **Demo video (3 min):** [watch on YouTube](https://youtu.be/0IP8RZXr5tk)<br>
 > 🖼️ **Morning report in Telegram:** [what is in it](#what-arrives-in-the-morning)
 
 ---
